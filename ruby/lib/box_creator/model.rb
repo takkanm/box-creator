@@ -1,5 +1,9 @@
 # The box itself: derived dimensions, validation and the three printable parts.
 # All parts are built in assembled coordinates (base floor at z = 0).
+#
+# The user gives inside dimensions. Width, depth and diameter are the base cavity
+# of a hollow box, or the lid interior of a box with holes, which has no cavity.
+# Height runs from the top of the floor to the lid ceiling.
 module BoxCreator
   class Model
     ROUND_STEPS = 6
@@ -9,7 +13,7 @@ module BoxCreator
     MIN_CAVITY = 2.0
     MAX_HOLES = 200
 
-    attr_reader :p, :base_h, :lid_h, :top_z, :floor, :layout, :warnings
+    attr_reader :p, :base_h, :lid_h, :top_z, :floor, :total_h, :layout, :warnings
 
     def initialize(values)
       @p = values
@@ -76,7 +80,7 @@ module BoxCreator
     def build_lid
       m = Mesh.new
       r_top = @p['r_top']
-      h = @p['h']
+      h = @total_h
       base_outer = @outline.ring(0.0).pts
       levels = [m.add_ring(base_outer, @base_h), m.add_ring(base_outer, h - r_top)]
       if r_top > 0
@@ -118,7 +122,9 @@ module BoxCreator
       lines << "base_h=#{fmt(@base_h)}"
       lines << "lid_h=#{fmt(@lid_h)}"
       lines << "top_z=#{fmt(@top_z)}"
-      lines << "h=#{fmt(@p['h'])}"
+      lines << "h=#{fmt(@total_h)}"
+      lines << "inner_h=#{fmt(@p['h'])}"
+      lines << "outer_size=#{@rect ? "#{fmt(outer_w)} × #{fmt(outer_d)}" : "Ø#{fmt(outer_dia)}"}"
       lines << "floor=#{fmt(@floor)}"
       lines << "ring_h=#{fmt(ring_height)}"
       if @rect
@@ -136,7 +142,7 @@ module BoxCreator
         lines << "hole_pitch_y=#{fmt(@layout[:pitch_y])}" if @layout[:rows] > 1
         lines << "hole_ring=#{fmt(@layout[:ring_radius])}" if @layout[:ring_radius]
         lines << "hole_points=#{@layout[:points].map { |q| "#{fmt(q[0])},#{fmt(q[1])}" }.join(';')}"
-        lines << "max_cyl_len=#{fmt(@p['h'] - @p['lid_topwall'] - (@top_z - @p['hole_depth']))}"
+        lines << "max_cyl_len=#{fmt(@total_h - @p['lid_topwall'] - (@top_z - @p['hole_depth']))}"
       elsif @rect
         size = @outline.size_at(lip_inset + @p['base_wall'])
         lines << "base_inner=#{fmt(size[0])} × #{fmt(size[1])}"
@@ -154,6 +160,23 @@ module BoxCreator
       @p['hole_d'] + @p['hole_clear']
     end
 
+    # Distance from an inside dimension to the outer surface, per side.
+    def side_thickness
+      @holes ? @p['lid_wall'] : lip_inset + @p['base_wall']
+    end
+
+    def outer_w
+      @p['w'] + 2.0 * side_thickness
+    end
+
+    def outer_d
+      @p['d'] + 2.0 * side_thickness
+    end
+
+    def outer_dia
+      @p['dia'] + 2.0 * side_thickness
+    end
+
     private
 
     def fmt(v)
@@ -162,16 +185,16 @@ module BoxCreator
     end
 
     def derive_heights
-      h = @p['h']
+      @floor = @holes ? @p['floor_holes'] : @p['floor_hollow']
+      @total_h = @p['h'] + @floor + @p['lid_topwall']
       if @p['split'] == 'base'
         @base_h = @p['split_h']
-        @lid_h = h - @base_h
+        @lid_h = @total_h - @base_h
       else
         @lid_h = @p['split_h']
-        @base_h = h - @lid_h
+        @base_h = @total_h - @lid_h
       end
       @top_z = @base_h + @p['lip_h']
-      @floor = @holes ? @p['floor_holes'] : @p['floor_hollow']
     end
 
     def lid_inner_levels(m, end_z)
@@ -253,11 +276,12 @@ module BoxCreator
       end
       if @lid_h < min_lid - 1e-9 || @base_h < min_base - 1e-9
         lid_from = fmt(min_lid)
-        lid_to = fmt(p['h'] - min_base)
-        if p['h'] < min_lid + min_base
-          problem('h', "全高は #{fmt(min_lid + min_base)} mm 以上にしてください")
+        lid_to = fmt(@total_h - min_base)
+        if @total_h < min_lid + min_base
+          lowest = min_lid + min_base - @floor - p['lid_topwall']
+          problem('h', "高さは #{fmt(lowest)} mm 以上にしてください")
         elsif p['split'] == 'base'
-          problem('split_h', "下箱の高さは #{fmt(min_base)}〜#{fmt(p['h'] - min_lid)} mm の範囲にしてください")
+          problem('split_h', "下箱の高さは #{fmt(min_base)}〜#{fmt(@total_h - min_lid)} mm の範囲にしてください")
         else
           problem('split_h', "蓋の高さは #{lid_from}〜#{lid_to} mm の範囲にしてください")
         end
@@ -266,18 +290,15 @@ module BoxCreator
 
     def validate_plan
       p = @p
-      inset = lip_inset + (@holes ? 0.0 : p['base_wall'])
+      # with holes the lip is narrower than the input by the fit on each side
+      need = MIN_CAVITY + (@holes ? 2.0 * p['fit'] : 0.0)
       if @rect
-        short = p['w'] < p['d'] ? p['w'] : p['d']
-        need = 2.0 * inset + MIN_CAVITY
-        if short < need
-          problem(p['w'] < p['d'] ? 'w' : 'd', "壁を残すには #{fmt(need)} mm 以上必要です")
-        end
-        limit = short / 2.0
+        short_key = p['w'] < p['d'] ? 'w' : 'd'
+        problem(short_key, "#{fmt(need)} mm 以上にしてください") if p[short_key] < need
+        limit = (outer_w < outer_d ? outer_w : outer_d) / 2.0
         problem('r_out', "角の半径は #{fmt(limit)} mm 未満にしてください") if p['r_out'] >= limit
-      else
-        need = 2.0 * inset + MIN_CAVITY
-        problem('dia', "壁を残すには #{fmt(need)} mm 以上必要です") if p['dia'] < need
+      elsif p['dia'] < need
+        problem('dia', "#{fmt(need)} mm 以上にしてください")
       end
     end
 
@@ -321,7 +342,7 @@ module BoxCreator
       dx = r - p['lid_wall']
       dy = r - p['lid_topwall']
       too_thin = dx > 0 && dy > 0 && r - Math.sqrt(dx * dx + dy * dy) < 0.5
-      short = @rect ? (p['w'] < p['d'] ? p['w'] : p['d']) : p['dia']
+      short = @rect ? (outer_w < outer_d ? outer_w : outer_d) : outer_dia
       if too_thin || r >= short / 2.0 - 1.0 || r >= @lid_h - p['lip_h']
         problem('r_top', '天面の丸めが大きすぎます')
       end
@@ -358,12 +379,13 @@ module BoxCreator
 
     def compute_layout(hole_d, count, w, d, dia)
       inset = lip_inset
+      wall = 2.0 * side_thickness
       if @rect
-        outline = RectOutline.new(w, d, @p['r_out'], @segs)
+        outline = RectOutline.new(w + wall, d + wall, @p['r_out'], @segs)
         size = outline.size_at(inset)
         Layout.rect(size[0], size[1], outline.radius_at(inset), hole_d, count, @p['min_wall'])
       else
-        Layout.circle(dia / 2.0 - inset, hole_d, count, @p['min_wall'])
+        Layout.circle((dia + wall) / 2.0 - inset, hole_d, count, @p['min_wall'])
       end
     end
 
@@ -405,7 +427,7 @@ module BoxCreator
             break
           end
         end
-        fixes << "外径を #{fmt(found)} mm 以上" if found
+        fixes << "内径を #{fmt(found)} mm 以上" if found
       end
       problem('hole_n', "#{count} 個の穴が入りません。#{fixes.join('、')}にしてください（穴 Ø#{fmt(hole_d)}、最小の壁厚 #{fmt(p['min_wall'])} mm）")
     end
@@ -413,9 +435,9 @@ module BoxCreator
     def prepare
       p = @p
       if @rect
-        @outline = RectOutline.new(p['w'], p['d'], p['r_out'], @segs)
+        @outline = RectOutline.new(outer_w, outer_d, p['r_out'], @segs)
       else
-        @outline = CircleOutline.new(p['dia'], @segs)
+        @outline = CircleOutline.new(outer_dia, @segs)
       end
       prepare_features
     end

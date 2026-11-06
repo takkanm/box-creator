@@ -4,7 +4,7 @@ const DEBOUNCE_MS = 300;
 
 // [key, label, default, step]
 const ADVANCED = [
-  ['r_out', '縦の角の丸め半径 R_OUT', 5, 0.5, 'rect'],
+  ['r_out', '外側の縦の角の丸め半径 R_OUT', 5, 0.5, 'rect'],
   ['lid_wall', '蓋の側壁の厚み', 2, 0.1],
   ['lid_topwall', '蓋の天面の厚み', 2, 0.1],
   ['fit', 'lip と蓋の隙間（片側）', 0.2, 0.05],
@@ -28,6 +28,8 @@ const ADVANCED = [
 ];
 
 const SUMMARY_ROWS = [
+  ['outer_size', '外形', 'mm'],
+  ['h', '全高', 'mm'],
   ['base_h', '下箱の外から見える高さ', 'mm'],
   ['top_z', '下箱の上端', 'mm'],
   ['lid_h', '蓋の高さ', 'mm'],
@@ -253,7 +255,9 @@ function download(kind) {
 
 // Keeps the same box when switching which height is entered.
 function flipSplitValue() {
-  const height = Number(form.elements.h.value);
+  const { h, content, floor_hollow, floor_holes, lid_topwall } = formValues();
+  const floor = content === 'holes' ? floor_holes : floor_hollow;
+  const height = Number(h) + Number(floor) + Number(lid_topwall);
   const input = form.elements.split_h;
   input.value = Math.round((height - Number(input.value)) * 100) / 100;
 }

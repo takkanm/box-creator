@@ -3,11 +3,24 @@ require_relative '../ruby/box_creator'
 require_relative 'support'
 
 class BoxTest < Minitest::Test
-  CASE1 = 'shape=rect w=70 d=58 h=100 split=lid split_h=33 content=hollow'.freeze
-  CASE2 = 'shape=rect w=50 d=29 h=69 split=base split_h=25 content=holes hole_d=16 hole_n=2 hole_depth=30'.freeze
-  CYL_HOLLOW = 'shape=cyl dia=60 h=100 split=lid split_h=33 content=hollow'.freeze
-  CYL_HOLES = 'shape=cyl dia=80 h=90 split=lid split_h=30 content=holes hole_d=16 hole_n=5 hole_depth=30'.freeze
-  TALL = 'shape=rect w=58 d=70 h=100 split=lid split_h=33 content=holes hole_d=12 hole_n=6 hole_depth=30'.freeze
+  # Inputs are inside dimensions. Outer sizes in the comments.
+  CASE1 = 'shape=rect w=61.6 d=49.6 h=96 split=lid split_h=33 content=hollow'.freeze # 70 x 58 x 100
+  CASE2 = 'shape=rect w=46 d=25 h=64 split=base split_h=25 content=holes hole_d=16 hole_n=2 hole_depth=30'.freeze # 50 x 29 x 69
+  CYL_HOLLOW = 'shape=cyl dia=51.6 h=96 split=lid split_h=33 content=hollow'.freeze # D60 x 100
+  CYL_HOLES = 'shape=cyl dia=76 h=85 split=lid split_h=30 content=holes hole_d=16 hole_n=5 hole_depth=30'.freeze # D80 x 90
+  TALL = 'shape=rect w=54 d=66 h=95 split=lid split_h=33 content=holes hole_d=12 hole_n=6 hole_depth=30'.freeze # 58 x 70 x 100
+
+  # Rewrites a spec written with outer sizes into inside dimensions.
+  def from_outer(spec)
+    holes = spec.include?('content=holes')
+    side = holes ? 2.0 : 4.2
+    floor = holes ? 3.0 : 2.0
+    spec.gsub(/\b(w|d|dia|h)=([\d.]+)/) do
+      key = Regexp.last_match(1)
+      value = Regexp.last_match(2).to_f
+      "#{key}=#{(key == 'h' ? value - floor - 2.0 : value - 2.0 * side).round(3)}"
+    end
+  end
 
   def text(spec)
     spec.split.join("\n")
@@ -71,7 +84,7 @@ class BoxTest < Minitest::Test
     specs << 'shape=cyl dia=12 h=30 split=lid split_h=11'
     specs << 'shape=cyl dia=25 h=30 split=lid split_h=11 segs=96'
     [32, 96, 100, 128].each { |s| specs << "w=70 d=58 h=100 segs=#{s}" }
-    specs.each do |spec|
+    specs.map { |spec| from_outer(spec) }.each do |spec|
       [0, 1, 2].each { |part| assert_solid stl(spec, part), "#{spec} part #{part}" }
     end
   end
@@ -88,6 +101,8 @@ class BoxTest < Minitest::Test
     assert_bounds ring, [[-35, 35], [-29, 29], [0, 10]], 'ring'
 
     i = info(CASE1)
+    assert_equal '100', i['h']
+    assert_equal '70 × 58', i['outer_size']
     assert_equal '67', i['base_h']
     assert_equal '75', i['top_z']
     assert_equal '61.6 × 49.6', i['base_inner']
@@ -136,6 +151,9 @@ class BoxTest < Minitest::Test
 
   def test_case2_dimensions_and_layout
     i = info(CASE2)
+    assert_equal '69', i['h']
+    assert_equal '50 × 29', i['outer_size']
+    assert_equal '46 × 25', i['lid_inner']
     assert_equal '25', i['base_h']
     assert_equal '33', i['top_z']
     assert_equal '17', i['hole_dia']
@@ -157,6 +175,44 @@ class BoxTest < Minitest::Test
 
   def test_hole_depth_limit
     assert_includes errors(CASE2.sub('hole_depth=30', 'hole_depth=30.5'))['hole_depth'], '30'
+  end
+
+  # --- inside dimensions -----------------------------------------------------
+
+  def test_hollow_inputs_are_the_base_cavity
+    spec = 'w=40 d=30 h=50 split=lid split_h=20'
+    base = stl(spec, 0)
+    assert_bounds base, [[-24.2, 24.2], [-19.2, 19.2], [0, 54 - 20 + 8]], 'outer size'
+    section = base.slice(10.01)
+    assert_in_delta 20.0, Section.ray_hits(section, 0).first, 1e-3
+    assert_in_delta 15.0, Section.ray_hits(section, 1).first, 1e-3
+  end
+
+  def test_hollow_cylinder_input_is_the_base_cavity
+    section = stl('shape=cyl dia=40 h=50 split=lid split_h=20', 0).slice(10.01)
+    assert_in_delta 20.0, Section.ray_hits(section, 0).first, 1e-3
+    assert_in_delta 24.2, Section.ray_hits(section, 0).last, 1e-3
+  end
+
+  def test_hole_inputs_are_the_lid_interior
+    spec = 'w=60 d=40 h=50 split=lid split_h=20 content=holes hole_d=10 hole_n=2'
+    i = info(spec)
+    assert_equal '60 × 40', i['lid_inner']
+    assert_equal '64 × 44', i['outer_size']
+    section = stl('shape=cyl dia=60 h=50 split=lid split_h=20 content=holes hole_d=10 hole_n=2', 1)
+              .unflipped(55).slice(50.01)
+    assert_in_delta 30.0, Section.ray_hits(section, 0).first, 1e-3
+  end
+
+  def test_height_is_from_floor_to_lid_ceiling
+    [['h=50 split=lid split_h=20', 2.0], ['h=50 split=lid split_h=20 content=holes hole_d=10 hole_n=1', 3.0]].each do |spec, floor|
+      i = info(spec)
+      total = i['h'].to_f
+      assert_in_delta 50 + floor + 2.0, total, 1e-9
+      lid = stl(spec, 1).unflipped(total)
+      assert Section.inside?(lid.slice(total - 1.9), 0, 0), 'lid top is solid'
+      refute Section.inside?(lid.slice(total - 2.1), 0, 0), 'ceiling is 2 below the top'
+    end
   end
 
   # --- assembled fit --------------------------------------------------------
@@ -219,22 +275,22 @@ class BoxTest < Minitest::Test
   # --- layout ---------------------------------------------------------------
 
   def test_rect_layout_runs_along_the_long_side
-    wide = info('w=120 d=40 h=60 content=holes hole_d=10 hole_n=3 hole_depth=15')
+    wide = info(from_outer('w=120 d=40 h=60 content=holes hole_d=10 hole_n=3 hole_depth=15'))
     assert_equal '1x3', wide['hole_grid']
     assert wide['hole_points'].split(';').all? { |q| q.split(',')[1].to_f.zero? }
-    narrow = info('w=40 d=120 h=60 content=holes hole_d=10 hole_n=3 hole_depth=15')
+    narrow = info(from_outer('w=40 d=120 h=60 content=holes hole_d=10 hole_n=3 hole_depth=15'))
     assert narrow['hole_points'].split(';').all? { |q| q.split(',')[0].to_f.zero? }
   end
 
   def test_rect_layout_uses_rows_when_needed
-    assert_equal '2x2', info('w=70 d=58 h=60 content=holes hole_d=16 hole_n=4 hole_depth=15')['hole_grid']
-    assert_equal '2x3', info('w=90 d=60 h=60 content=holes hole_d=16 hole_n=5 hole_depth=15')['hole_grid']
+    assert_equal '2x2', info(from_outer('w=70 d=58 h=60 content=holes hole_d=16 hole_n=4 hole_depth=15'))['hole_grid']
+    assert_equal '2x3', info(from_outer('w=90 d=60 h=60 content=holes hole_d=16 hole_n=5 hole_depth=15'))['hole_grid']
   end
 
   def test_circle_layout
-    one = info('shape=cyl dia=60 h=60 content=holes hole_d=16 hole_n=1 hole_depth=15')
+    one = info(from_outer('shape=cyl dia=60 h=60 content=holes hole_d=16 hole_n=1 hole_depth=15'))
     assert_equal '0,0', one['hole_points']
-    four = info('shape=cyl dia=80 h=60 content=holes hole_d=12 hole_n=4 hole_depth=15')
+    four = info(from_outer('shape=cyl dia=80 h=60 content=holes hole_d=12 hole_n=4 hole_depth=15'))
     radii = four['hole_points'].split(';').map { |q| Math.hypot(*q.split(',').map(&:to_f)) }
     assert_operator radii.max - radii.min, :<, 0.02
   end
@@ -242,7 +298,7 @@ class BoxTest < Minitest::Test
   def test_all_layouts_respect_min_wall
     specs = (1..12).map { |n| "w=120 d=80 h=60 content=holes hole_d=10 hole_n=#{n} hole_depth=15" }
     specs += (1..7).map { |n| "shape=cyl dia=90 h=60 content=holes hole_d=12 hole_n=#{n} hole_depth=15" }
-    specs.each do |spec|
+    specs.map { |spec| from_outer(spec) }.each do |spec|
       model = BoxCreator::Model.new(BoxCreator::Params.parse(text(spec)))
       pts = model.layout[:points]
       d = model.hole_diameter
@@ -262,29 +318,29 @@ class BoxTest < Minitest::Test
   # --- validation -----------------------------------------------------------
 
   def test_too_many_holes_names_the_fix
-    message = errors('w=50 d=29 h=69 content=holes hole_d=16 hole_n=5 hole_depth=20')['hole_n']
+    message = errors('w=46 d=25 h=64 content=holes hole_d=16 hole_n=5 hole_depth=20')['hole_n']
     assert_includes message, '個数を 2 個以下'
     assert_includes message, '円筒の直径'
     assert_includes message, '幅 W'
   end
 
   def test_too_many_holes_in_a_cylinder_names_the_fix
-    message = errors('shape=cyl dia=40 h=60 content=holes hole_d=16 hole_n=4 hole_depth=15')['hole_n']
-    assert_includes message, '外径を'
+    message = errors('shape=cyl dia=36 h=60 content=holes hole_d=16 hole_n=4 hole_depth=15')['hole_n']
+    assert_includes message, '内径を'
   end
 
   def test_suggested_fixes_actually_fit
-    message = errors('w=50 d=29 h=69 content=holes hole_d=16 hole_n=3 hole_depth=20')['hole_n']
+    message = errors('w=46 d=25 h=64 content=holes hole_d=16 hole_n=3 hole_depth=20')['hole_n']
     width = message[/幅 W を ([\d.]+)/, 1]
     diameter = message[/円筒の直径を ([\d.]+)/, 1]
-    assert info("w=#{width} d=29 h=69 content=holes hole_d=16 hole_n=3 hole_depth=20")
-    assert info("w=50 d=29 h=69 content=holes hole_d=#{diameter} hole_n=3 hole_depth=20")
+    assert info("w=#{width} d=25 h=64 content=holes hole_d=16 hole_n=3 hole_depth=20")
+    assert info("w=46 d=25 h=64 content=holes hole_d=#{diameter} hole_n=3 hole_depth=20")
   end
 
   def test_absurd_hole_counts_are_rejected_quickly
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     assert errors('content=holes hole_n=100000').key?('hole_n')
-    message = errors('w=50 d=29 h=69 content=holes hole_d=16 hole_n=200 hole_depth=20')['hole_n']
+    message = errors('w=46 d=25 h=64 content=holes hole_d=16 hole_n=200 hole_depth=20')['hole_n']
     assert_includes message, '個数を 2 個以下'
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 2.0
   end
@@ -292,20 +348,21 @@ class BoxTest < Minitest::Test
   def test_height_split_limits
     assert errors('h=100 split=lid split_h=5').key?('split_h')
     assert errors('h=100 split=base split_h=95').key?('split_h')
-    assert errors('h=8').key?('h')
+    assert errors('h=2').key?('h')
   end
 
   def test_bad_values_are_reported_per_field
     assert errors('w=0').key?('w')
-    assert errors('w=8 d=58').key?('w')
+    assert errors('w=1 d=58').key?('w')
+    assert errors('shape=cyl dia=1').key?('dia')
     assert errors('mouth_chamf=3').key?('mouth_chamf')
     assert errors('content=holes hole_n=1.5').key?('hole_n')
     assert errors('segs=4').key?('segs')
   end
 
   def test_split_by_base_height_equals_split_by_lid_height
-    a = BoxCreator.generate(text('h=100 split=lid split_h=33'), 0)
-    b = BoxCreator.generate(text('h=100 split=base split_h=67'), 0)
+    a = BoxCreator.generate(text('h=96 split=lid split_h=33'), 0)
+    b = BoxCreator.generate(text('h=96 split=base split_h=67'), 0)
     assert_equal a, b
   end
 end

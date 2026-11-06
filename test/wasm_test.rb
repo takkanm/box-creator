@@ -9,10 +9,10 @@ require_relative 'support'
 # compared with a tolerance rather than byte for byte.
 class WasmTest < Minitest::Test
   CASES = {
-    'case1' => 'shape=rect w=70 d=58 h=100 split=lid split_h=33 content=hollow',
-    'case2' => 'shape=rect w=50 d=29 h=69 split=base split_h=25 content=holes hole_d=16 hole_n=2 hole_depth=30',
-    'cyl' => 'shape=cyl dia=60 h=100 split=lid split_h=33 content=hollow',
-    'cylholes' => 'shape=cyl dia=80 h=90 split=lid split_h=30 content=holes hole_d=16 hole_n=5 hole_depth=30',
+    'case1' => 'shape=rect w=61.6 d=49.6 h=96 split=lid split_h=33 content=hollow',
+    'case2' => 'shape=rect w=46 d=25 h=64 split=base split_h=25 content=holes hole_d=16 hole_n=2 hole_depth=30',
+    'cyl' => 'shape=cyl dia=51.6 h=96 split=lid split_h=33 content=hollow',
+    'cylholes' => 'shape=cyl dia=76 h=85 split=lid split_h=30 content=holes hole_d=16 hole_n=5 hole_depth=30',
     'grid12' => 'w=120 d=80 h=60 content=holes hole_d=10 hole_n=12 hole_depth=15',
     'grid40' => 'w=180 d=120 h=60 content=holes hole_d=8 hole_n=40 hole_depth=15 segs=128'
   }.freeze
@@ -51,7 +51,7 @@ class WasmTest < Minitest::Test
   end
 
   def test_validation_errors_cross_the_boundary
-    run_wasm(['err|3|w=50 d=29 h=69 content=holes hole_d=16 hole_n=5 hole_depth=20']) do |dir|
+    run_wasm(['err|3|w=46 d=25 h=64 content=holes hole_d=16 hole_n=5 hole_depth=20']) do |dir|
       out = File.binread("#{dir}/err.bin").force_encoding('UTF-8')
       assert out.start_with?("!ERR\nhole_n\t"), out
       assert_includes out, '個数を 2 個以下'

@@ -25,21 +25,23 @@
 
       <form id="form" autocomplete="off" novalidate>
         <section class="group">
-          <h2>箱の形状</h2>
+          <h2>箱の形状と内寸</h2>
           <div class="segmented" role="radiogroup" aria-label="箱の形状">
             <label><input type="radio" name="shape" value="rect" checked><span>四角</span></label>
             <label><input type="radio" name="shape" value="cyl"><span>円筒</span></label>
           </div>
           <div class="fields" data-show="shape=rect">
-            <div class="field" data-field="w"><label for="f-w">幅 W</label><input id="f-w" name="w" type="number" step="0.5" value="70"></div>
-            <div class="field" data-field="d"><label for="f-d">奥行き D</label><input id="f-d" name="d" type="number" step="0.5" value="58"></div>
+            <div class="field" data-field="w"><label for="f-w">内寸 幅 W</label><input id="f-w" name="w" type="number" step="0.1" value="61.6"></div>
+            <div class="field" data-field="d"><label for="f-d">内寸 奥行き D</label><input id="f-d" name="d" type="number" step="0.1" value="49.6"></div>
           </div>
           <div class="fields" data-show="shape=cyl">
-            <div class="field" data-field="dia"><label for="f-dia">外径</label><input id="f-dia" name="dia" type="number" step="0.5" value="60"></div>
+            <div class="field" data-field="dia"><label for="f-dia">内径</label><input id="f-dia" name="dia" type="number" step="0.1" value="51.6"></div>
           </div>
           <div class="fields">
-            <div class="field" data-field="h"><label for="f-h">全高 H</label><input id="f-h" name="h" type="number" step="0.5" value="100"></div>
+            <div class="field" data-field="h"><label for="f-h">内寸 高さ H</label><input id="f-h" name="h" type="number" step="0.5" value="96"></div>
           </div>
+          <p class="hint" data-show="content=hollow">内寸は下箱の中の寸法です。高さは床の上面から蓋の天井までです。</p>
+          <p class="hint" data-show="content=holes">内寸は蓋の中の寸法です。高さは床の上面から蓋の天井までです。</p>
         </section>
 
         <section class="group">
