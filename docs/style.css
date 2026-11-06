@@ -115,6 +115,7 @@ details[open] summary { margin-bottom: 10px; }
 .segmented span { display: block; padding: 4px 12px; border-radius: 6px; font-size: 13px; }
 .segmented input:checked + span { background: var(--surface); box-shadow: 0 0 0 1px var(--line); font-weight: 600; }
 .segmented input:focus-visible + span { outline: 2px solid var(--accent); }
+.segmented input:disabled + span { color: var(--muted); opacity: 0.55; cursor: not-allowed; }
 
 #summary { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-size: 13px; }
 #summary dt { color: var(--muted); }

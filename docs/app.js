@@ -2,28 +2,35 @@ import { makeZip } from './zip.js';
 
 const DEBOUNCE_MS = 300;
 
-// [key, label, default, step]
+const SNAP_ONLY = '!shape=cyl,closure=screw';
+const SCREW_ONLY = 'shape=cyl,closure=screw';
+
+// [key, label, default, step, condition]
+// A condition lists key=value pairs that must all match; a leading ! hides on a match.
 const ADVANCED = [
-  ['r_out', '外側の縦の角の丸め半径 R_OUT', 5, 0.5, 'rect'],
+  ['r_out', '外側の縦の角の丸め半径 R_OUT', 5, 0.5, 'shape=rect'],
   ['lid_wall', '蓋の側壁の厚み', 2, 0.1],
   ['lid_topwall', '蓋の天面の厚み', 2, 0.1],
-  ['fit', 'lip と蓋の隙間（片側）', 0.2, 0.05],
+  ['fit', 'lip と蓋の隙間（片側）', 0.2, 0.05, SNAP_ONLY],
   ['lip_h', 'lip の高さ', 8, 0.5],
   ['lip_chamf', 'lip 上端の面取り', 0.8, 0.1],
   ['mouth_chamf', '蓋の開口部の面取り', 0.6, 0.1],
   ['r_top', '蓋の天面の縁の丸め', 1.5, 0.1],
-  ['base_wall', '下箱の壁の厚み（空洞）', 2, 0.1, null, 'hollow'],
-  ['floor_hollow', '底の厚み（空洞）', 2, 0.5, null, 'hollow'],
-  ['floor_holes', '底の厚み（穴あり）', 3, 0.5, null, 'holes'],
-  ['hole_clear', '穴の遊び（直径に足す）', 1, 0.1, null, 'holes'],
-  ['hole_chamf', '穴の入口の面取り', 1, 0.1, null, 'holes'],
-  ['min_wall', '最小の壁厚', 3, 0.5, null, 'holes'],
-  ['bump', 'rib の飛び出し', 0.5, 0.05],
-  ['bump_r', 'rib の断面の半径', 1.2, 0.05],
-  ['groove_depth', '溝の深さ', 0.6, 0.05],
-  ['groove_r', '溝の断面の半径', 1.35, 0.05],
-  ['rib_pct', 'rib の長さ（長辺に対する %）', 45, 1, 'rect'],
-  ['rib_arc', 'rib の長さ（周方向）', 15, 0.5, 'cyl'],
+  ['base_wall', '下箱の壁の厚み（空洞）', 2, 0.1, 'content=hollow'],
+  ['floor_hollow', '底の厚み（空洞）', 2, 0.5, 'content=hollow'],
+  ['floor_holes', '底の厚み（穴あり）', 3, 0.5, 'content=holes'],
+  ['hole_clear', '穴の遊び（直径に足す）', 1, 0.1, 'content=holes'],
+  ['hole_chamf', '穴の入口の面取り', 1, 0.1, 'content=holes'],
+  ['min_wall', '最小の壁厚', 3, 0.5, 'content=holes'],
+  ['bump', 'rib の飛び出し', 0.5, 0.05, SNAP_ONLY],
+  ['bump_r', 'rib の断面の半径', 1.2, 0.05, SNAP_ONLY],
+  ['groove_depth', '溝の深さ', 0.6, 0.05, SNAP_ONLY],
+  ['groove_r', '溝の断面の半径', 1.35, 0.05, SNAP_ONLY],
+  ['rib_pct', 'rib の長さ（長辺に対する %）', 45, 1, 'shape=rect'],
+  ['rib_arc', 'rib の長さ（周方向）', 15, 0.5, 'shape=cyl,closure=snap'],
+  ['thread_pitch', 'ネジのピッチ', 3, 0.1, SCREW_ONLY],
+  ['thread_depth', 'ネジ山の深さ', 1, 0.1, SCREW_ONLY],
+  ['thread_clear', 'ネジの隙間（半径方向）', 0.35, 0.05, SCREW_ONLY],
   ['segs', '円の分割数（1 周あたり）', 128, 4],
 ];
 
@@ -42,6 +49,8 @@ const SUMMARY_ROWS = [
   ['hole_pitch_y', '行の間隔', 'mm'],
   ['max_cyl_len', '収納できる円筒の長さ', 'mm 以下'],
   ['rib_len', 'rib の長さ', 'mm'],
+  ['thread_pitch', 'ネジのピッチ', 'mm'],
+  ['thread_turns', 'ネジのかかり', '周'],
 ];
 
 const form = document.getElementById('form');
@@ -63,12 +72,11 @@ let advancedAutoOpened = false; // opened only to show an error, not by the user
 
 function buildAdvancedFields() {
   const box = document.getElementById('advanced-fields');
-  for (const [key, label, value, step, shape, content] of ADVANCED) {
+  for (const [key, label, value, step, condition] of ADVANCED) {
     const field = document.createElement('div');
     field.className = 'field';
     field.dataset.field = key;
-    if (shape) field.dataset.show = `shape=${shape}`;
-    if (content) field.dataset.show = `content=${content}`;
+    if (condition) field.dataset.show = condition;
     const id = `f-${key}`;
     field.innerHTML = `<label for="${id}">${label}</label><input id="${id}" name="${key}" type="number" step="${step}" value="${value}">`;
     box.append(field);
@@ -83,11 +91,28 @@ function paramsText() {
   return Object.entries(formValues()).map(([k, v]) => `${k}=${v}`).join('\n');
 }
 
+function matches(condition, values) {
+  const negated = condition.startsWith('!');
+  const all = condition.replace('!', '').split(',').every((pair) => {
+    const [key, value] = pair.split('=');
+    return values[key] === value;
+  });
+  return negated ? !all : all;
+}
+
+// A square lid cannot turn, so the screw closure is for round boxes only.
+function syncClosure() {
+  const rect = form.elements.shape.value === 'rect';
+  const [snap, screw] = form.elements.closure;
+  screw.disabled = rect;
+  if (rect) snap.checked = true;
+}
+
 function syncVisibility() {
+  syncClosure();
   const values = formValues();
   for (const el of document.querySelectorAll('[data-show]')) {
-    const [key, value] = el.dataset.show.split('=');
-    el.hidden = values[key] !== value;
+    el.hidden = !matches(el.dataset.show, values);
   }
   document.getElementById('split-label').textContent = values.split === 'base' ? '下箱の高さ' : '蓋の高さ';
 }

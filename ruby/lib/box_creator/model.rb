@@ -12,6 +12,8 @@ module BoxCreator
     MIN_RIB_MARGIN = 1.0
     MIN_CAVITY = 2.0
     MAX_HOLES = 200
+    THREAD_SHOULDER_GAP = 0.4 # plain lip left above the shoulder
+    THREAD_END_GAP = 0.2 # and below the lip chamfer
 
     attr_reader :p, :base_h, :lid_h, :top_z, :floor, :total_h, :layout, :warnings
 
@@ -20,6 +22,7 @@ module BoxCreator
       @warnings = []
       @rect = @p['shape'] != 'cyl'
       @holes = @p['content'] == 'holes'
+      @screw = !@rect && @p['closure'] == 'screw' # a square lid cannot turn
       @segs = (@p['segs'].to_i / 4) * 4
       derive_heights
       validate
@@ -34,7 +37,13 @@ module BoxCreator
       @holes
     end
 
+    def screw?
+      @screw
+    end
+
+    # From the outer surface to the lip: its root circle on a threaded box.
     def lip_inset
+      return @p['lid_wall'] + @p['thread_depth'] + @p['thread_clear'] if @screw
       @p['lid_wall'] + @p['fit']
     end
 
@@ -55,6 +64,9 @@ module BoxCreator
       lip = @outline.ring(lip_inset, rib)
       levels = [m.add_ring(lip.pts, @base_h)]
       rib.z_levels.each { |z| levels << m.add_ring(lip.displaced(rib, z), z) } if rib
+      if @male_thread
+        @male_thread.z_levels.each { |z| levels << m.add_ring(@male_thread.apply(lip.pts, z), z) }
+      end
       chamf = @p['lip_chamf']
       levels << m.add_ring(lip.pts, @top_z - chamf)
       if chamf > 0
@@ -131,7 +143,8 @@ module BoxCreator
         lid_size = @outline.size_at(@p['lid_wall'])
         lines << "lid_inner=#{fmt(lid_size[0])} × #{fmt(lid_size[1])}"
       else
-        lines << "lid_inner=Ø#{fmt(@outline.radius_at(@p['lid_wall']) * 2.0)}"
+        narrowest = @p['lid_wall'] + (@screw ? @p['thread_depth'] : 0.0)
+        lines << "lid_inner=Ø#{fmt(@outline.radius_at(narrowest) * 2.0)}"
       end
       if @holes
         hole_d = hole_diameter
@@ -152,6 +165,10 @@ module BoxCreator
         lines << "base_depth=#{fmt(@top_z - @floor)}"
       end
       lines << "rib_len=#{fmt(@rib ? @rib.length : 0.0)}"
+      if @screw
+        lines << "thread_pitch=#{fmt(@p['thread_pitch'])}"
+        lines << "thread_turns=#{fmt(@male_thread.turns)}"
+      end
       @warnings.each { |w| lines << "warn=#{w}" }
       lines
     end
@@ -160,9 +177,11 @@ module BoxCreator
       @p['hole_d'] + @p['hole_clear']
     end
 
-    # Distance from an inside dimension to the outer surface, per side.
+    # Distance from an inside dimension to the outer surface, per side. In a
+    # threaded lid the inside dimension is the narrowest part, at the thread crests.
     def side_thickness
-      @holes ? @p['lid_wall'] : lip_inset + @p['base_wall']
+      return lip_inset + @p['base_wall'] unless @holes
+      @p['lid_wall'] + (@screw ? @p['thread_depth'] : 0.0)
     end
 
     def outer_w
@@ -209,6 +228,9 @@ module BoxCreator
         levels << m.add_ring(inner.pts, @base_h)
       end
       groove.z_levels.each { |z| levels << m.add_ring(inner.displaced(groove, z), z) } if groove
+      if @female_thread
+        @female_thread.z_levels.each { |z| levels << m.add_ring(@female_thread.apply(inner.pts, z), z) }
+      end
       levels << m.add_ring(inner.pts, end_z)
       m.stack(levels, true)
       levels
@@ -247,13 +269,14 @@ module BoxCreator
     def validate
       @problems = []
       p = @p
-      require_positive(%w[h lid_wall lid_topwall fit lip_h base_wall bump bump_r groove_depth groove_r])
+      require_positive(%w[h lid_wall lid_topwall lip_h base_wall])
+      require_positive(@screw ? %w[thread_pitch thread_depth thread_clear] : %w[fit bump bump_r groove_depth groove_r])
       require_non_negative(%w[lip_chamf mouth_chamf r_top hole_chamf hole_clear min_wall])
       require_positive([@holes ? 'floor_holes' : 'floor_hollow'])
       require_positive(@rect ? %w[w d] : %w[dia])
       problem('r_out', '0.5 以上の値を入力してください') if @rect && p['r_out'] < 0.5
       problem('rib_pct', '0 より大きい値を入力してください') if @rect && p['rib_pct'] <= 0
-      problem('rib_arc', '0 より大きい値を入力してください') if !@rect && p['rib_arc'] <= 0
+      problem('rib_arc', '0 より大きい値を入力してください') if !@rect && !@screw && p['rib_arc'] <= 0
       if @segs < 16 || @segs > 512
         problem('segs', '16 から 512 の範囲で入力してください')
       end
@@ -267,7 +290,7 @@ module BoxCreator
 
     def validate_heights
       p = @p
-      min_lid = p['lip_h'] + p['lid_topwall'] + p['fit']
+      min_lid = p['lip_h'] + p['lid_topwall'] + (@screw ? p['thread_clear'] : p['fit'])
       min_base = 0.5
       unless @holes
         # the floor must stay below the rim even for a very low base
@@ -291,7 +314,7 @@ module BoxCreator
     def validate_plan
       p = @p
       # with holes the lip is narrower than the input by the fit on each side
-      need = MIN_CAVITY + (@holes ? 2.0 * p['fit'] : 0.0)
+      need = MIN_CAVITY + (@holes ? 2.0 * (@screw ? p['thread_clear'] : p['fit']) : 0.0)
       if @rect
         short_key = p['w'] < p['d'] ? 'w' : 'd'
         problem(short_key, "#{fmt(need)} mm 以上にしてください") if p[short_key] < need
@@ -314,6 +337,11 @@ module BoxCreator
         problem('mouth_chamf', "開口部の面取りは蓋の壁の厚み #{fmt(p['lid_wall'])} mm 未満にしてください")
       end
       validate_top_round
+      if @screw
+        validate_thread
+        validate_holes if @holes && @problems.empty?
+        return
+      end
       problem('bump', 'rib の半径以下にしてください') if p['bump'] > p['bump_r']
       problem('groove_depth', '溝の半径以下にしてください') if p['groove_depth'] > p['groove_r']
       if p['groove_depth'] >= p['lid_wall']
@@ -333,6 +361,29 @@ module BoxCreator
         problem('lip_h', "溝が入るように lip の高さを増やしてください")
       end
       validate_holes if @holes
+    end
+
+    def validate_thread
+      p = @p
+      lowest_pitch = 2.0 * p['thread_depth'] + 0.4
+      if p['thread_pitch'] < lowest_pitch
+        problem('thread_pitch', "ピッチは #{fmt(lowest_pitch)} mm 以上にしてください（山の深さの 2 倍 + 0.4）")
+        return
+      end
+      span = male_thread_end - male_thread_start
+      need = p['thread_pitch'] + 2.0 * p['thread_depth']
+      if span < need
+        lowest = p['lip_h'] + need - span
+        problem('lip_h', "ネジが 1 周以上かかるように、lip の高さを #{fmt(lowest)} mm 以上にしてください")
+      end
+    end
+
+    def male_thread_start
+      @base_h + THREAD_SHOULDER_GAP
+    end
+
+    def male_thread_end
+      @top_z - @p['lip_chamf'] - THREAD_END_GAP
     end
 
     # The rounded edge must not eat through to the corner of the lid cavity.
@@ -442,8 +493,23 @@ module BoxCreator
       prepare_features
     end
 
+    def prepare_thread
+      p = @p
+      pitch = p['thread_pitch']
+      depth = p['thread_depth']
+      @male_thread = Thread.new(pitch, depth, male_thread_start, male_thread_end, true)
+      first_z = @base_h + p['mouth_chamf'] + THREAD_END_GAP
+      limit = @base_h + ring_height - THREAD_END_GAP
+      last_z = @top_z < limit ? @top_z : limit
+      @female_thread = Thread.new(pitch, depth, first_z, last_z, false)
+    end
+
     def prepare_features
       p = @p
+      if @screw
+        prepare_thread
+        return
+      end
       center_z = @base_h + p['lip_h'] / 2.0
       lid_wall = p['lid_wall']
       rib_end = Feature.half_chord(p['bump_r'], p['bump'])

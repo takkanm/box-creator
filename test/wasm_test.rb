@@ -13,6 +13,8 @@ class WasmTest < Minitest::Test
     'case2' => 'shape=rect w=46 d=25 h=64 split=base split_h=25 content=holes hole_d=16 hole_n=2 hole_depth=30',
     'cyl' => 'shape=cyl dia=51.6 h=96 split=lid split_h=33 content=hollow',
     'cylholes' => 'shape=cyl dia=76 h=85 split=lid split_h=30 content=holes hole_d=16 hole_n=5 hole_depth=30',
+    'screw' => 'shape=cyl dia=51.6 h=96 split=lid split_h=33 content=hollow closure=screw',
+    'screwholes' => 'shape=cyl dia=70 h=85 split=lid split_h=30 content=holes hole_d=16 hole_n=5 hole_depth=30 closure=screw',
     'grid12' => 'w=120 d=80 h=60 content=holes hole_d=10 hole_n=12 hole_depth=15',
     'grid40' => 'w=180 d=120 h=60 content=holes hole_d=8 hole_n=40 hole_depth=15 segs=128'
   }.freeze

@@ -58,6 +58,81 @@ module BoxCreator
     end
   end
 
+  # A right-handed single-start thread with a 45 degree trapezoid profile. It is
+  # applied ring by ring: each vertex moves radially by an amount that depends on
+  # the thread phase at its height and angle, so a level stays a plain closed loop.
+  #
+  # The male and female sides use the same profile and the same phase. The female
+  # radius is the male radius plus the clearance at every phase, so the parts cannot
+  # collide anywhere along the helix. Near its ends a thread fades towards the side
+  # that removes material, which keeps that guarantee.
+  class Thread
+    LEVELS_PER_PITCH = 24
+
+    attr_reader :first_z, :last_z
+
+    # male: pushes a root circle outward. Otherwise pushes a root circle inward.
+    def initialize(pitch, depth, first_z, last_z, male)
+      @pitch = pitch
+      @depth = depth
+      @first_z = first_z
+      @last_z = last_z
+      @male = male
+      flat = pitch - 2.0 * depth
+      @crest = flat * 0.4
+    end
+
+    def z_levels
+      count = ((@last_z - @first_z) / @pitch * LEVELS_PER_PITCH).ceil
+      levels = []
+      i = 0
+      while i <= count
+        levels << @first_z + (@last_z - @first_z) * i / count
+        i += 1
+      end
+      levels
+    end
+
+    # Full turns at full depth.
+    def turns
+      (@last_z - @first_z - @depth) / @pitch
+    end
+
+    def apply(pts, z)
+      fade = fade_at(z)
+      return pts if fade == 0.0
+      pts.map do |p|
+        angle = Math.atan2(p[1], p[0])
+        height = profile(z / @pitch - angle / (2.0 * Math::PI))
+        d = @male ? @depth * height * fade : -@depth * (1.0 - height) * fade
+        radius = Math.sqrt(p[0] * p[0] + p[1] * p[1])
+        scale = (radius + d) / radius
+        [p[0] * scale, p[1] * scale]
+      end
+    end
+
+    private
+
+    def fade_at(z)
+      low = (z - @first_z) / @depth
+      high = (@last_z - z) / @depth
+      f = low < high ? low : high
+      return 0.0 if f <= 0.0
+      f > 1.0 ? 1.0 : f
+    end
+
+    # 0 at the root, 1 at the crest. phase is in turns; one turn is one pitch.
+    def profile(phase)
+      t = (phase - phase.floor) * @pitch
+      half_crest = @crest / 2.0
+      centre = @pitch / 2.0
+      d = (t - centre).abs
+      return 1.0 if d <= half_crest
+      slope = (d - half_crest) / @depth
+      slope >= 1.0 ? 0.0 : 1.0 - slope
+    end
+  end
+
   class Ring
     attr_reader :pts
 

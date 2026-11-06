@@ -16,7 +16,10 @@ t0 = Time.now
            'content' => holes ? 'holes' : 'hollow', 'hole_d' => rng.rand(3.0..30.0).round(1),
            'hole_n' => rng.rand(1..14), 'hole_depth' => rng.rand(3.0..20.0).round(1),
            'segs' => [16, 32, 48, 64, 96].sample(random: rng), 'fit' => rng.rand(0.1..0.4).round(2),
-           'r_top' => rng.rand(0.0..2.0).round(2), 'lip_chamf' => rng.rand(0.0..1.0).round(2) }
+           'r_top' => rng.rand(0.0..2.0).round(2), 'lip_chamf' => rng.rand(0.0..1.0).round(2),
+           'closure' => rng.rand < 0.5 ? 'screw' : 'snap', 'lip_h' => rng.rand(7.0..14.0).round(1),
+           'thread_pitch' => rng.rand(2.2..4.0).round(1), 'thread_depth' => rng.rand(0.5..1.5).round(2),
+           'thread_clear' => rng.rand(0.15..0.5).round(2) }
   text = spec.map { |k, v| "#{k}=#{v}" }.join("\n")
   begin
     info = BoxCreator.generate(text, 3)

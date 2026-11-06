@@ -20,7 +20,7 @@
     <aside class="panel">
       <header class="title">
         <h1>Box Creator</h1>
-        <p>カチッと閉まる蓋付きの箱を、寸法から STL にします。単位はすべて mm です。</p>
+        <p>蓋付きの箱を、寸法から STL にします。単位はすべて mm です。</p>
       </header>
 
       <form id="form" autocomplete="off" novalidate>
@@ -42,6 +42,16 @@
           </div>
           <p class="hint" data-show="content=hollow">内寸は下箱の中の寸法です。高さは床の上面から蓋の天井までです。</p>
           <p class="hint" data-show="content=holes">内寸は蓋の中の寸法です。高さは床の上面から蓋の天井までです。</p>
+        </section>
+
+        <section class="group">
+          <h2>蓋の閉じ方</h2>
+          <div class="segmented" role="radiogroup" aria-label="蓋の閉じ方">
+            <label><input type="radio" name="closure" value="snap" checked><span>はめ込み</span></label>
+            <label><input type="radio" name="closure" value="screw"><span>ネジ式</span></label>
+          </div>
+          <p class="hint" data-show="shape=rect">ネジ式は円筒の箱で選べます。</p>
+          <p class="hint" data-show="shape=cyl,closure=screw">右ネジです。蓋を時計回りに回して閉めます。</p>
         </section>
 
         <section class="group">

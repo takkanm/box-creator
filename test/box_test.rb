@@ -10,6 +10,9 @@ class BoxTest < Minitest::Test
   CYL_HOLES = 'shape=cyl dia=76 h=85 split=lid split_h=30 content=holes hole_d=16 hole_n=5 hole_depth=30'.freeze # D80 x 90
   TALL = 'shape=rect w=54 d=66 h=95 split=lid split_h=33 content=holes hole_d=12 hole_n=6 hole_depth=30'.freeze # 58 x 70 x 100
 
+  SCREW = 'shape=cyl dia=51.6 h=96 split=lid split_h=33 content=hollow closure=screw'.freeze
+  SCREW_HOLES = 'shape=cyl dia=70 h=85 split=lid split_h=30 content=holes hole_d=16 hole_n=5 hole_depth=30 closure=screw'.freeze
+
   # Rewrites a spec written with outer sizes into inside dimensions.
   def from_outer(spec)
     holes = spec.include?('content=holes')
@@ -213,6 +216,97 @@ class BoxTest < Minitest::Test
       assert Section.inside?(lid.slice(total - 1.9), 0, 0), 'lid top is solid'
       refute Section.inside?(lid.slice(total - 2.1), 0, 0), 'ceiling is 2 below the top'
     end
+  end
+
+  # --- screw lid -----------------------------------------------------------------
+
+  def test_screw_parts_are_clean
+    [SCREW, SCREW_HOLES].each do |spec|
+      [0, 1, 2].each do |part|
+        mesh = stl(spec, part)
+        assert_solid mesh, "#{spec} part #{part}"
+        assert_empty mesh.self_intersections.first(3), "#{spec} part #{part}: self-intersection"
+      end
+    end
+  end
+
+  def test_screw_parameter_sweep
+    specs = []
+    [[3, 1, 0.35], [2, 0.7, 0.2], [4, 1.5, 0.5], [2.4, 1, 0.3]].each do |pitch, depth, clear|
+      specs << "#{SCREW} thread_pitch=#{pitch} thread_depth=#{depth} thread_clear=#{clear} lip_h=10"
+    end
+    specs << "#{SCREW} segs=96"
+    specs << "#{SCREW} lip_chamf=0 mouth_chamf=0 r_top=0"
+    specs << "#{SCREW} lip_h=14 split_h=20"
+    specs << "#{SCREW} r_top=3 lid_topwall=1 split_h=11.5"
+    specs << 'shape=cyl dia=8 h=30 split=lid split_h=11 closure=screw'
+    specs.each do |spec|
+      [0, 1, 2].each { |part| assert_solid stl(spec, part), "#{spec} part #{part}" }
+    end
+  end
+
+  def test_screw_dimensions_from_inside_size
+    i = info(SCREW)
+    # 25.8 cavity + 2 base wall = 27.8 root, + 1 depth + 0.35 clearance + 2 lid wall
+    assert_equal 'Ø62.3', i['outer_size']
+    assert_equal '51.6', i['base_inner'].delete('Ø')
+    assert_equal '3', i['thread_pitch']
+    assert_equal '0', i['rib_len']
+
+    base, lid, base_h, top_z, = assembled(SCREW)
+    assert_in_delta 25.8, Section.ray_hits(base.slice(10.01), 0).first, 1e-3
+    assert_in_delta 31.15, Section.ray_hits(base.slice(10.01), 0).last, 1e-3
+    assert_in_delta 27.8, Section.ray_hits(base.slice(base_h + 0.2), 0).last, 1e-3 # plain lip above the shoulder
+    radii = base.verts.select { |v| v[2] > base_h + 0.01 }.map { |v| Math.hypot(v[0], v[1]) }
+    assert_in_delta 28.8, radii.max, 1e-2 # thread crest
+    assert_in_delta 29.15, Section.ray_hits(lid.slice(top_z + 1.0), 0).first, 1e-3 # plain lid wall
+  end
+
+  def test_screw_inside_size_of_holes_is_the_thread_crest
+    spec = SCREW_HOLES
+    assert_equal 'Ø70', info(spec)['lid_inner']
+    assert_equal 'Ø76', info(spec)['outer_size']
+    _, lid, base_h, top_z, = assembled(spec)
+    radii = lid.verts.select { |v| v[2] > base_h + 1 && v[2] < top_z }.map { |v| Math.hypot(v[0], v[1]) }
+    assert_in_delta 35.0, radii.min, 1e-2
+  end
+
+  def test_screw_clearance_when_closed
+    [SCREW, SCREW_HOLES].each do |spec|
+      base, lid, base_h, top_z, = assembled(spec)
+      (0..24).map { |k| base_h + 0.033 + k * (top_z - base_h - 0.066) / 24.0 }.each do |z|
+        b = base.slice(z)
+        l = lid.slice(z)
+        points = b.flatten(1)
+        assert points.none? { |x, y| Section.inside?(l, x, y) }, "#{spec}: overlap at z=#{z}"
+        assert_operator Section.gap(points, l), :>=, 0.3, "#{spec}: clearance at z=#{z}"
+      end
+    end
+  end
+
+  def test_thread_engages_and_is_right_handed
+    base, lid, base_h, = assembled(SCREW)
+    z1 = base_h + 3.013
+    z2 = z1 + 0.75 # a quarter turn higher
+    crest1 = base.slice(z1).flatten(1).max_by { |x, y| Math.hypot(x, y) }
+    crest2 = base.slice(z2).flatten(1).max_by { |x, y| Math.hypot(x, y) }
+    turned = (Math.atan2(crest2[1], crest2[0]) - Math.atan2(crest1[1], crest1[0])) % (2 * Math::PI)
+    assert_in_delta Math::PI / 2, turned, 0.12, 'crest climbs counter-clockwise, a right-hand thread'
+
+    crest_r = Math.hypot(*crest1)
+    rib_r = lid.slice(z1).flatten(1).map { |x, y| Math.hypot(x, y) }.select { |r| r < 30 }.min
+    assert_operator rib_r, :<, crest_r - 0.5, 'lid thread reaches between the base thread'
+  end
+
+  def test_rect_box_ignores_screw_closure
+    plain = BoxCreator.generate(text('w=40 d=30 h=50 split_h=20'), 0)
+    assert_equal plain, BoxCreator.generate(text('w=40 d=30 h=50 split_h=20 closure=screw'), 0)
+  end
+
+  def test_screw_validation
+    assert errors("#{SCREW} thread_pitch=2").key?('thread_pitch')
+    assert errors("#{SCREW} lip_h=4").key?('lip_h')
+    assert errors("#{SCREW} thread_clear=0").key?('thread_clear')
   end
 
   # --- assembled fit --------------------------------------------------------
