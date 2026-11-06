@@ -1,7 +1,7 @@
 // Runs the mruby generator off the main thread.
 import createBoxModule from './box.js';
 
-const PART = { base: 0, lid: 1, ring: 2, info: 3 };
+const PART = { base: 0, lid: 1, ring: 2, info: 3, adjust: 4 };
 
 const ready = createBoxModule().then((mod) => ({
   mod,
@@ -28,20 +28,29 @@ function parseErrors(text) {
   });
 }
 
-self.onmessage = async ({ data: { id, params } }) => {
+// Lines added after the input override it, so the corrected values can simply
+// be appended to the parameters.
+function parseAdjusted(text) {
+  return text.split('\n').slice(1).filter(Boolean);
+}
+
+self.onmessage = async ({ data: { id, params, auto } }) => {
   try {
     const box = await ready;
     const started = performance.now();
-    const infoText = new TextDecoder().decode(call(box, params, PART.info));
+    const changes = auto ? parseAdjusted(new TextDecoder().decode(call(box, params, PART.adjust))) : [];
+    const input = [params, ...changes].join('\n');
+    const adjusted = Object.fromEntries(changes.map((line) => line.split('=')));
+    const infoText = new TextDecoder().decode(call(box, input, PART.info));
     if (infoText.startsWith('!ERR')) {
-      self.postMessage({ id, errors: parseErrors(infoText) });
+      self.postMessage({ id, adjusted, errors: parseErrors(infoText) });
       return;
     }
-    const base = call(box, params, PART.base).buffer;
-    const lid = call(box, params, PART.lid).buffer;
-    const ring = call(box, params, PART.ring).buffer;
+    const base = call(box, input, PART.base).buffer;
+    const lid = call(box, input, PART.lid).buffer;
+    const ring = call(box, input, PART.ring).buffer;
     const ms = performance.now() - started;
-    self.postMessage({ id, info: infoText, base, lid, ring, ms }, [base, lid, ring]);
+    self.postMessage({ id, adjusted, info: infoText, base, lid, ring, ms }, [base, lid, ring]);
   } catch (error) {
     self.postMessage({ id, fatal: String(error.message || error) });
   }

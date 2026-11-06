@@ -4,6 +4,7 @@ module BoxCreator
   PART_LID = 1
   PART_RING = 2
   PART_INFO = 3
+  PART_ADJUST = 4
 
   def self.build_part(model, part)
     case part
@@ -14,9 +15,11 @@ module BoxCreator
     end
   end
 
-  # Returns binary STL for parts 0-2 and "INFO\nkey=value..." for part 3.
+  # Returns binary STL for parts 0-2, "INFO\nkey=value..." for part 3 and
+  # "ADJUST\nkey=value..." with the values Adjust changed for part 4.
   # Invalid input returns "!ERR\nfield\tmessage..." rather than raising.
   def self.generate(text, part)
+    return Adjust.report(text) if part == PART_ADJUST
     model = Model.new(Params.parse(text))
     return "INFO\n" + model.info_lines.join("\n") if part == PART_INFO
     build_part(model, part).to_stl('box-creator')

@@ -102,6 +102,11 @@ details[open] summary { margin-bottom: 10px; }
 
 .hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 
+.field.adjusted input { border-color: var(--warn-ink); background: var(--warn-soft); }
+.field .adjust-note { margin: 3px 0 0; color: var(--warn-ink); font-size: 12px; }
+.adjust-notes { margin: 6px 0 0; padding: 0; list-style: none; }
+.adjust-notes li { margin-top: 4px; padding: 6px 8px; border-radius: 6px; background: var(--warn-soft); color: var(--warn-ink); font-size: 12px; }
+
 .segmented {
   display: inline-flex;
   padding: 2px;

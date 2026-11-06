@@ -254,8 +254,31 @@ module BoxCreator
       m.cap(top_outer, entries, true)
     end
 
-    def problem(field, message)
-      @problems << [field, message]
+    # fixes: [key, value] pairs that would clear this problem, best first. Adjust
+    # applies them; a problem without fixes is left for the user to decide.
+    def problem(field, message, fixes = [])
+      @problems << [field, message, fixes]
+    end
+
+    # Round numbers on the valid side of a limit. above and below are for strict
+    # limits, at_least and at_most for limits the value may touch.
+    def above(v)
+      ((v + 1e-6) * 10.0).ceil / 10.0
+    end
+
+    def below(v)
+      x = ((v - 1e-6) * 10.0).floor / 10.0
+      x < 0 ? 0.0 : x
+    end
+
+    def at_least(v)
+      x = ((v - 1e-9) * 100.0).ceil / 100.0
+      x < v ? x + 0.01 : x
+    end
+
+    def at_most(v)
+      x = ((v + 1e-9) * 100.0).floor / 100.0
+      x > v ? x - 0.01 : x
     end
 
     def require_positive(keys)
@@ -304,11 +327,17 @@ module BoxCreator
           lowest = min_lid + min_base - @floor - p['lid_topwall']
           problem('h', "高さは #{fmt(lowest)} mm 以上にしてください")
         elsif p['split'] == 'base'
-          problem('split_h', "下箱の高さは #{fmt(min_base)}〜#{fmt(@total_h - min_lid)} mm の範囲にしてください")
+          problem('split_h', "下箱の高さは #{fmt(min_base)}〜#{fmt(@total_h - min_lid)} mm の範囲にしてください",
+                  [['split_h', split_fix(min_base, @total_h - min_lid)]])
         else
-          problem('split_h', "蓋の高さは #{lid_from}〜#{lid_to} mm の範囲にしてください")
+          problem('split_h', "蓋の高さは #{lid_from}〜#{lid_to} mm の範囲にしてください",
+                  [['split_h', split_fix(min_lid, @total_h - min_base)]])
         end
       end
+    end
+
+    def split_fix(low, high)
+      @p['split_h'] < low ? at_least(low) : at_most(high)
     end
 
     def validate_plan
@@ -319,7 +348,7 @@ module BoxCreator
         short_key = p['w'] < p['d'] ? 'w' : 'd'
         problem(short_key, "#{fmt(need)} mm 以上にしてください") if p[short_key] < need
         limit = (outer_w < outer_d ? outer_w : outer_d) / 2.0
-        problem('r_out', "角の半径は #{fmt(limit)} mm 未満にしてください") if p['r_out'] >= limit
+        problem('r_out', "角の半径は #{fmt(limit)} mm 未満にしてください", [['r_out', below(limit)]]) if p['r_out'] >= limit
       elsif p['dia'] < need
         problem('dia', "#{fmt(need)} mm 以上にしてください")
       end
@@ -328,13 +357,13 @@ module BoxCreator
     def validate_details
       p = @p
       if p['lip_chamf'] >= p['base_wall'] && !@holes
-        problem('lip_chamf', "lip の面取りは壁の厚み #{fmt(p['base_wall'])} mm 未満にしてください")
+        problem('lip_chamf', "lip の面取りは壁の厚み #{fmt(p['base_wall'])} mm 未満にしてください", [['lip_chamf', below(p['base_wall'])]])
       end
       if p['lip_chamf'] >= p['lip_h']
-        problem('lip_chamf', "lip の面取りは lip の高さ未満にしてください")
+        problem('lip_chamf', "lip の面取りは lip の高さ未満にしてください", [['lip_chamf', below(p['lip_h'])]])
       end
       if p['mouth_chamf'] >= p['lid_wall']
-        problem('mouth_chamf', "開口部の面取りは蓋の壁の厚み #{fmt(p['lid_wall'])} mm 未満にしてください")
+        problem('mouth_chamf', "開口部の面取りは蓋の壁の厚み #{fmt(p['lid_wall'])} mm 未満にしてください", [['mouth_chamf', below(p['lid_wall'])]])
       end
       validate_top_round
       if @screw
@@ -342,10 +371,14 @@ module BoxCreator
         validate_holes if @holes && @problems.empty?
         return
       end
-      problem('bump', 'rib の半径以下にしてください') if p['bump'] > p['bump_r']
-      problem('groove_depth', '溝の半径以下にしてください') if p['groove_depth'] > p['groove_r']
+      if p['bump'] > p['bump_r']
+        problem('bump', 'rib の半径以下にしてください', [['bump', p['bump_r']], ['bump_r', p['bump']]])
+      end
+      if p['groove_depth'] > p['groove_r']
+        problem('groove_depth', '溝の半径以下にしてください', [['groove_depth', p['groove_r']], ['groove_r', p['groove_depth']]])
+      end
       if p['groove_depth'] >= p['lid_wall']
-        problem('groove_depth', "溝の深さは蓋の壁の厚み #{fmt(p['lid_wall'])} mm 未満にしてください")
+        problem('groove_depth', "溝の深さは蓋の壁の厚み #{fmt(p['lid_wall'])} mm 未満にしてください", [['groove_depth', below(p['lid_wall'])]])
       end
       if p['bump'] <= p['fit']
         @warnings << 'rib の飛び出しが隙間 FIT 以下のため、はまり代がありません'
@@ -356,9 +389,9 @@ module BoxCreator
       room_low = p['lip_h'] / 2.0 - p['mouth_chamf']
       room_high = p['lip_h'] / 2.0 - p['lip_chamf']
       if rib_end >= room_high
-        problem('lip_h', "rib が入るように lip の高さを増やしてください")
+        problem('lip_h', "rib が入るように lip の高さを増やしてください", [['lip_h', above(2.0 * (rib_end + p['lip_chamf']))]])
       elsif groove_end >= room_low
-        problem('lip_h', "溝が入るように lip の高さを増やしてください")
+        problem('lip_h', "溝が入るように lip の高さを増やしてください", [['lip_h', above(2.0 * (groove_end + p['mouth_chamf']))]])
       end
       validate_holes if @holes
     end
@@ -367,14 +400,15 @@ module BoxCreator
       p = @p
       lowest_pitch = 2.0 * p['thread_depth'] + 0.4
       if p['thread_pitch'] < lowest_pitch
-        problem('thread_pitch', "ピッチは #{fmt(lowest_pitch)} mm 以上にしてください（山の深さの 2 倍 + 0.4）")
+        problem('thread_pitch', "ピッチは #{fmt(lowest_pitch)} mm 以上にしてください（山の深さの 2 倍 + 0.4）",
+                [['thread_pitch', at_least(lowest_pitch)], ['thread_depth', at_most((p['thread_pitch'] - 0.4) / 2.0)]])
         return
       end
       span = male_thread_end - male_thread_start
       need = p['thread_pitch'] + 2.0 * p['thread_depth']
       if span < need
         lowest = p['lip_h'] + need - span
-        problem('lip_h', "ネジが 1 周以上かかるように、lip の高さを #{fmt(lowest)} mm 以上にしてください")
+        problem('lip_h', "ネジが 1 周以上かかるように、lip の高さを #{fmt(lowest)} mm 以上にしてください", [['lip_h', at_least(lowest + 1e-6)]])
       end
     end
 
@@ -388,15 +422,19 @@ module BoxCreator
 
     # The rounded edge must not eat through to the corner of the lid cavity.
     def validate_top_round
+      return if top_round_fits?(@p['r_top'])
+      tenths = (@p['r_top'] * 10.0).floor
+      tenths -= 1 while tenths > 0 && !top_round_fits?(tenths / 10.0)
+      problem('r_top', '天面の丸めが大きすぎます', [['r_top', tenths / 10.0]])
+    end
+
+    def top_round_fits?(r)
       p = @p
-      r = p['r_top']
       dx = r - p['lid_wall']
       dy = r - p['lid_topwall']
       too_thin = dx > 0 && dy > 0 && r - Math.sqrt(dx * dx + dy * dy) < 0.5
       short = @rect ? (outer_w < outer_d ? outer_w : outer_d) : outer_dia
-      if too_thin || r >= short / 2.0 - 1.0 || r >= @lid_h - p['lip_h']
-        problem('r_top', '天面の丸めが大きすぎます')
-      end
+      !(too_thin || r >= short / 2.0 - 1.0 || r >= @lid_h - p['lip_h'])
     end
 
     def validate_holes
@@ -415,12 +453,14 @@ module BoxCreator
       end
       max_depth = @top_z - @floor
       if p['hole_depth'] > max_depth + 1e-9
-        problem('hole_depth', "穴の深さは #{fmt(max_depth)} mm 以下にしてください（下箱の上端 #{fmt(@top_z)} − 床 #{fmt(@floor)}）")
+        problem('hole_depth', "穴の深さは #{fmt(max_depth)} mm 以下にしてください（下箱の上端 #{fmt(@top_z)} − 床 #{fmt(@floor)}）", [['hole_depth', at_most(max_depth)]])
       elsif p['hole_depth'] <= p['hole_chamf']
-        problem('hole_depth', "穴の深さは面取り #{fmt(p['hole_chamf'])} mm より大きくしてください")
+        problem('hole_depth', "穴の深さは面取り #{fmt(p['hole_chamf'])} mm より大きくしてください",
+                [['hole_depth', above(p['hole_chamf'])], ['hole_chamf', below(p['hole_depth'])]])
       end
       if p['min_wall'] <= 2.0 * p['hole_chamf'] || p['min_wall'] <= p['hole_chamf'] + p['lip_chamf']
-        problem('min_wall', '最小の壁厚は、面取りが重ならない値まで増やしてください')
+        by_chamf = p['hole_chamf'] > p['lip_chamf'] ? 2.0 * p['hole_chamf'] : p['hole_chamf'] + p['lip_chamf']
+        problem('min_wall', '最小の壁厚は、面取りが重ならない値まで増やしてください', [['min_wall', above(by_chamf)]])
       end
       return unless @problems.empty?
       count = p['hole_n'].to_i

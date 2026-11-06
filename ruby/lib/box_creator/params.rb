@@ -28,6 +28,14 @@ module BoxCreator
 
     TEXT_KEYS = %w[shape split content closure].freeze
 
+    # The field the user touched last, sent as "edited=key". Empty when none.
+    def self.edited(text)
+      text.split("\n").each do |line|
+        return line[7..-1].strip if line.start_with?('edited=')
+      end
+      ''
+    end
+
     def self.parse(text)
       values = {}
       DEFAULTS.each { |k, v| values[k] = v }

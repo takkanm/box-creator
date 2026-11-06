@@ -52,6 +52,15 @@ class WasmTest < Minitest::Test
     end
   end
 
+  def test_adjustments_match_cruby
+    spec = 'base_wall=0.5 lid_wall=0.5 edited=base_wall'
+    run_wasm(["adj|4|#{spec}"]) do |dir|
+      out = File.binread("#{dir}/adj.bin").force_encoding('UTF-8')
+      assert_equal BoxCreator.generate(spec.split.join("\n"), 4), out
+      assert_includes out, 'lip_chamf=0.4'
+    end
+  end
+
   def test_validation_errors_cross_the_boundary
     run_wasm(['err|3|w=46 d=25 h=64 content=holes hole_d=16 hole_n=5 hole_depth=20']) do |dir|
       out = File.binread("#{dir}/err.bin").force_encoding('UTF-8')

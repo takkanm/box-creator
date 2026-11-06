@@ -25,6 +25,12 @@
 
       <form id="form" autocomplete="off" novalidate>
         <section class="group">
+          <label class="check"><input type="checkbox" id="auto-adjust"> 自動修正モード</label>
+          <p class="hint">範囲外になる値を、関係する別の項目で調整します。入力中の項目、内寸、穴の直径と個数は変えません。</p>
+          <ul id="adjust-notes" class="adjust-notes"></ul>
+        </section>
+
+        <section class="group">
           <h2>箱の形状と内寸</h2>
           <div class="segmented" role="radiogroup" aria-label="箱の形状">
             <label><input type="radio" name="shape" value="rect" checked><span>四角</span></label>

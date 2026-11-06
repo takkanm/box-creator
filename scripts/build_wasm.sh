@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MRUBY="$ROOT/vendor/mruby"
 OUT="$MRUBY/build/box"
-SOURCES=(earcut outline mesh layout params model api)
+SOURCES=(earcut outline mesh layout params model adjust api)
 
 EMSDK_QUIET=1 source "$ROOT/vendor/emsdk/emsdk_env.sh"
 

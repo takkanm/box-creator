@@ -60,6 +60,8 @@ const overlay = document.getElementById('overlay');
 const summaryEl = document.getElementById('summary');
 const warningsEl = document.getElementById('warnings');
 const downloadButtons = [...document.querySelectorAll('[data-download]')];
+const autoToggle = document.getElementById('auto-adjust');
+const adjustNotes = document.getElementById('adjust-notes');
 
 let preview = null;
 let latest = null; // last valid result: { base, lid, ring, info }
@@ -69,6 +71,10 @@ let queued = false;
 let timer = 0;
 let dirty = false; // the form changed and no request has been sent for it yet
 let advancedAutoOpened = false; // opened only to show an error, not by the user
+let editedKey = ''; // the field auto adjust must leave as typed
+// What the user entered for each field now showing a corrected value. Requests
+// send these, so a correction goes away once it is no longer needed.
+const entered = new Map();
 
 function buildAdvancedFields() {
   const box = document.getElementById('advanced-fields');
@@ -88,7 +94,49 @@ function formValues() {
 }
 
 function paramsText() {
-  return Object.entries(formValues()).map(([k, v]) => `${k}=${v}`).join('\n');
+  const values = { ...formValues(), ...Object.fromEntries(entered) };
+  const lines = Object.entries(values).map(([k, v]) => `${k}=${v}`);
+  if (autoToggle.checked) lines.push(`edited=${editedKey}`);
+  return lines.join('\n');
+}
+
+function fieldLabel(key) {
+  return form.querySelector(`[data-field="${key}"] label`).textContent;
+}
+
+function showAdjustNotes() {
+  for (const el of form.querySelectorAll('.field.adjusted')) {
+    el.classList.remove('adjusted');
+    el.querySelector('.adjust-note').remove();
+  }
+  adjustNotes.replaceChildren(...[...entered].map(([key, value]) => {
+    const note = document.createElement('p');
+    note.className = 'adjust-note';
+    note.textContent = `自動調整しました（入力値 ${value}）`;
+    const field = form.querySelector(`[data-field="${key}"]`);
+    field.classList.add('adjusted');
+    field.append(note);
+    const li = document.createElement('li');
+    li.textContent = `${fieldLabel(key)}: ${value} → ${form.elements[key].value}`;
+    return li;
+  }));
+}
+
+function applyAdjusted(adjusted) {
+  for (const [key, value] of entered) {
+    if (key in adjusted) continue;
+    form.elements[key].value = value;
+    entered.delete(key);
+  }
+  for (const [key, value] of Object.entries(adjusted)) {
+    if (!entered.has(key)) entered.set(key, form.elements[key].value);
+    form.elements[key].value = value;
+  }
+  showAdjustNotes();
+}
+
+function restoreEntered() {
+  applyAdjusted({});
 }
 
 function matches(condition, values) {
@@ -221,7 +269,7 @@ function regenerate() {
   busy = true;
   dirty = false;
   statusEl.textContent = '生成中…';
-  worker.postMessage({ id: ++requestId, params: paramsText() });
+  worker.postMessage({ id: ++requestId, params: paramsText(), auto: autoToggle.checked });
 }
 
 const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
@@ -233,6 +281,7 @@ worker.onmessage = ({ data }) => {
     regenerate();
     return; // newer input is waiting, this result is already stale
   }
+  if (data.adjusted && !dirty) applyAdjusted(data.adjusted);
   if (data.fatal) {
     overlay.textContent = `生成に失敗しました: ${data.fatal}`;
     overlay.hidden = false;
@@ -290,7 +339,15 @@ function flipSplitValue() {
 form.addEventListener('submit', (event) => event.preventDefault());
 
 form.addEventListener('input', (event) => {
-  if (event.target.name === 'split') flipSplitValue();
+  if (event.target === autoToggle) {
+    editedKey = '';
+    if (!autoToggle.checked) restoreEntered();
+  } else {
+    editedKey = event.target.name;
+    if (editedKey === 'split') entered.delete('split_h');
+    entered.delete(editedKey);
+    if (editedKey === 'split') flipSplitValue();
+  }
   syncVisibility();
   // What is on screen no longer matches the form, so it must not be downloaded.
   dirty = true;
@@ -304,6 +361,8 @@ advanced.querySelector('summary').addEventListener('click', () => {
 });
 
 document.getElementById('reset-advanced').addEventListener('click', () => {
+  restoreEntered();
+  editedKey = '';
   for (const [key, , value] of ADVANCED) form.elements[key].value = value;
   setDownloadsEnabled(false);
   regenerate();
