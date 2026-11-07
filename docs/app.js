@@ -34,6 +34,15 @@ const ADVANCED = [
   ['segs', '円の分割数（1 周あたり）', 128, 4],
 ];
 
+// A round wall flexes less than a flat one, so the lid of a round box needs a
+// looser fit and a smaller catch to go on.
+const CYL_DEFAULTS = { fit: 0.25, bump: 0.4 };
+
+function defaultValue(key, shape) {
+  const [, , value] = ADVANCED.find(([name]) => name === key);
+  return shape === 'cyl' ? CYL_DEFAULTS[key] ?? value : value;
+}
+
 const SUMMARY_ROWS = [
   ['outer_size', '外形', 'mm'],
   ['h', '全高', 'mm'],
@@ -278,6 +287,15 @@ function download(kind) {
   }
 }
 
+// Values the user changed stay as they are.
+function switchShapeDefaults(shape) {
+  const previous = shape === 'cyl' ? 'rect' : 'cyl';
+  for (const key of Object.keys(CYL_DEFAULTS)) {
+    const input = form.elements[key];
+    if (Number(input.value) === defaultValue(key, previous)) input.value = defaultValue(key, shape);
+  }
+}
+
 // Keeps the same box when switching which height is entered.
 function flipSplitValue() {
   const { h, content, floor_hollow, floor_holes, lid_topwall } = formValues();
@@ -291,6 +309,7 @@ form.addEventListener('submit', (event) => event.preventDefault());
 
 form.addEventListener('input', (event) => {
   if (event.target.name === 'split') flipSplitValue();
+  if (event.target.name === 'shape') switchShapeDefaults(event.target.value);
   syncVisibility();
   // What is on screen no longer matches the form, so it must not be downloaded.
   dirty = true;
@@ -304,7 +323,8 @@ advanced.querySelector('summary').addEventListener('click', () => {
 });
 
 document.getElementById('reset-advanced').addEventListener('click', () => {
-  for (const [key, , value] of ADVANCED) form.elements[key].value = value;
+  const shape = form.elements.shape.value;
+  for (const [key] of ADVANCED) form.elements[key].value = defaultValue(key, shape);
   setDownloadsEnabled(false);
   regenerate();
 });

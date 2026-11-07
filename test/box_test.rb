@@ -338,6 +338,23 @@ class BoxTest < Minitest::Test
     end
   end
 
+  def test_looser_round_lid_defaults_still_engage
+    spec = "#{CYL_HOLLOW} fit=0.25 bump=0.4"
+    assert_equal 'Ø60.1', info(spec)['outer_size']
+    [0, 1, 2].each { |part| assert_solid stl(spec, part), "part #{part}" }
+    base, lid, base_h, top_z, = assembled(spec)
+    z = (base_h + top_z) / 2.0 + 0.001
+    rib_tip = Section.ray_hits(base.slice(z), 1).last
+    lid_wall = Section.ray_hits(lid.slice(base_h + 7.5), 1).first
+    groove = Section.ray_hits(lid.slice(z), 1).first
+    assert_in_delta 0.15, rib_tip - lid_wall, 1e-3, 'BUMP - FIT'
+    assert_in_delta 0.45, groove - rib_tip, 1e-3, 'clearance inside the groove'
+    section_levels(base_h, top_z).each do |level|
+      points = base.slice(level).flatten(1)
+      refute points.any? { |x, y| Section.inside?(lid.slice(level), x, y) }, "overlap at z=#{level}"
+    end
+  end
+
   def test_rib_engages_groove
     [CASE1, CYL_HOLLOW].each do |spec|
       base, lid, base_h, top_z, = assembled(spec)
